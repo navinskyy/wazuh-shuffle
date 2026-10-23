@@ -149,7 +149,10 @@ systemctl is-active wazuh-manager wazuh-indexer wazuh-dashboard
 ```
 All three should print `active`. Open `https://<VM_IP>` and log in as `admin`.
 
-<!-- 📸 Add screenshot: docs/images/wazuh-dashboard.png -->
+> [!TIP]
+> Dashboard times out but the services are `active`? firewalld is probably blocking port 443. See [Troubleshooting](#-troubleshooting) → *Wazuh dashboard times out, but Shuffle (3443) works*.
+
+<img width="1873" height="854" alt="image" src="https://github.com/user-attachments/assets/9a2c5e57-feff-4120-8018-3adf4394f61e" />
 
 ---
 
@@ -169,7 +172,9 @@ systemctl enable --now firewalld
 firewall-cmd --permanent --add-port={443,1514,1515,55000,3001,3443}/tcp
 firewall-cmd --reload
 systemctl restart docker
+firewall-cmd --list-ports
 ```
+`--list-ports` should show `443/tcp 1514/tcp 1515/tcp 3001/tcp 3443/tcp 55000/tcp`.
 
 > [!WARNING]
 > Starting or restarting `firewalld` while Docker is running **wipes Docker's network rules**. The Shuffle UI still loads, but it can't reach its backend ("Failed to save the workflow. Is the network down?"). **Always run `systemctl restart docker` after touching firewalld.**
@@ -216,7 +221,8 @@ docker ps --format '{{.Names}}  {{.Status}}'
 ### 4.4 Open the UI
 Go to `https://<VM_IP>:3443`, accept the self-signed certificate, and create the admin account.
 
-<!-- 📸 Add screenshot: docs/images/shuffle-login.png -->
+<img width="570" height="473" alt="image" src="https://github.com/user-attachments/assets/4e77d6c2-f5bf-4271-8a63-ca4714426847" />
+
 
 ---
 
@@ -237,7 +243,7 @@ https://<VM_IP>:3443/api/v1/hooks/webhook_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 > [!TIP]
 > For Wazuh, change the start of the URL to **`http://<VM_IP>:3001`**. Wazuh's integration script can fail on Shuffle's self-signed HTTPS certificate, and plain HTTP on 3001 avoids that.
 
-<!-- 📸 Add screenshot: docs/images/shuffle-webhook.png -->
+<img width="1873" height="918" alt="image" src="https://github.com/user-attachments/assets/7708a0cf-57e0-49fa-93cb-8244e9b38516" />
 
 ---
 
@@ -284,7 +290,7 @@ systemctl restart wazuh-manager && systemctl is-active wazuh-manager
 ### 6.4 Confirm alerts arrive
 In Shuffle, open the workflow and click **Debug**. Every Wazuh alert creates a new **run** with a webhook icon, and the webhook node's counter goes up.
 
-<!-- 📸 Add screenshot: docs/images/shuffle-runs.png -->
+<img width="1867" height="930" alt="image" src="https://github.com/user-attachments/assets/f56405be-d189-4316-a55e-70f2d1ec5f01" />
 
 ### 6.5 What Wazuh sends
 ```json
@@ -349,7 +355,8 @@ Discord → your channel → ⚙️ **Edit Channel** → **Integrations** → **
 ### 7.3 Test with a previous alert
 Click **▶ Run** in the bottom bar, choose **Select** on any previous alert, and check Discord.
 
-<!-- 📸 Add screenshot: docs/images/discord-alert.png -->
+<img width="786" height="479" alt="image" src="https://github.com/user-attachments/assets/f4392658-a25d-4a9c-8de6-c7381e662fe3" />
+
 
 ---
 
@@ -397,7 +404,8 @@ User: fakeuser
 Time: 2026-10-23T14:45:12.345+0800
 ```
 
-<!-- 📸 Add screenshot: docs/images/bruteforce-discord.png -->
+<img width="602" height="171" alt="image" src="https://github.com/user-attachments/assets/d7d3b878-1063-4f2c-8a1b-5bf306ff2d69" />
+
 
 ✅ **Result:** an attack is detected by Wazuh and automatically reported to the SOC channel through Shuffle, with no manual steps.
 
@@ -437,6 +445,23 @@ docker start shuffle-orborus
 <summary><b>Wazuh installer: "wazuh-manager could not be started"</b></summary>
 
 Usually a port conflict (1514 or 9200) that appeared during the install. Check with `ss -tulnp | grep -E ':1514|:9200'`, free the port, and rerun with `-o`.
+</details>
+
+<details>
+<summary><b>Wazuh dashboard times out, but Shuffle (3443) works</b></summary>
+
+Docker publishes its ports through its own firewall rules, which bypass firewalld. Wazuh runs directly on the host, so firewalld blocks it unless the ports are open. firewalld also starts again automatically after a reboot. Check:
+```bash
+systemctl is-active wazuh-manager wazuh-indexer wazuh-dashboard   # all active
+ss -tlnp | grep -E ':443 |:55000'                                  # Wazuh is listening
+firewall-cmd --list-ports                                          # empty = blocked
+```
+Fix (restart Docker afterwards, because the reload can wipe its rules):
+```bash
+firewall-cmd --permanent --add-port={443,1514,1515,55000,3001,3443}/tcp
+firewall-cmd --reload
+systemctl restart docker && cd ~/Shuffle && docker compose up -d
+```
 </details>
 
 <details>
@@ -509,7 +534,7 @@ If `curl` creates a run but Wazuh doesn't, check `<level>` and the `hook_url` in
 
 - 🔌 **Port planning first.** Wazuh and Shuffle both want `9200`, and Shuffle's Tenzir wants `1514`. Remap Shuffle's OpenSearch to `9201` and let Wazuh keep `1514`.
 - 🧱 **Edit the right service.** In `docker-compose.yml`, change only the `shuffle-opensearch` port, never the frontend.
-- 🔥 **Firewalld vs Docker.** After touching firewalld, restart Docker.
+- 🔥 **Firewalld vs Docker.** Docker's ports bypass firewalld; Wazuh's don't. Open Wazuh's ports with `--permanent`, and restart Docker after touching firewalld.
 - 💾 **Disk = uptime.** A full disk makes OpenSearch read-only and silently breaks saving. Give the VM 60 GB+.
 - 🧮 **RAM sanity.** Never assign the VM more RAM than the host has. 16 GB is enough for this lab.
 - 🧪 **Test in layers.** Webhook received? → action ran? → HTTP status? → message delivered? Shuffle's *Debug* view shows each layer.
