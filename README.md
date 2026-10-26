@@ -318,6 +318,49 @@ Use any field in later actions with `$exec`:
 | `$exec.all_fields.data.srcuser` | `fakeuser` |
 | `$exec.timestamp` | `2026-10-26T14:32:45.076+0800` |
 
+### 6.6 Understanding agents: `000` (the manager) vs enrolled agents
+
+Every alert in Wazuh belongs to **one agent**, and an agent is **a monitored machine** — it reports what happens *on itself*, not who attacked it.
+
+| Agent | Machine | How it got there | What it reports |
+|---|---|---|---|
+| `000` | The Rocky VM (the **manager**) | **Automatic** — the manager always monitors itself | VM log sources, including **SSH login attempts** |
+| `001` | A Windows PC (e.g. `WINHACKER-42`) | **Enrolled** with the Wazuh agent installer | Windows logons (event 4625), registry/FIM, etc. |
+
+Key points this lab makes clear:
+
+- **Agent `000` is not something you install.** Installing the Wazuh manager (Part 2) automatically creates it. That's why SSH alerts work before any agent is enrolled.
+- **The alert lands on the *target* machine, not the attacker.** When the Windows PC (`208.8.8.1`) brute-forces the VM's SSH, the alert is logged under **agent `000`** (the VM), because the failed login happened *on the VM*. The attacker is identified by the **`data.srcip`** field, not by the agent.
+- **Agent `000` is not in the "Explore agent" picker.** That picker only lists *enrolled* agents (like the Windows PC). To see the manager's own events, open **☰ menu → Threat Hunting** (the global view, not the per-agent page). If an `agent.id` filter is **pinned**, click the 📌 pin icon next to the agent name (top right) to unpin it first.
+
+> [!TIP]
+> Quick search to see the SSH authentication failures on the manager:
+> ```
+> rule.groups:authentication_failed
+> ```
+> The *Top 5 agents* panel will show `localhost.localdomain` (agent `000`), and *Top MITRE* will show **Password Guessing / SSH** (T1110).
+
+<details>
+<summary><b>Enrolling another agent (Windows / Linux)</b></summary>
+
+**Windows** (PowerShell as Administrator):
+```powershell
+msiexec.exe /i wazuh-agent-4.12.0.msi /q WAZUH_MANAGER="<VM_IP>" WAZUH_AGENT_NAME="WINHACKER-42"
+NET START WazuhSvc
+```
+
+**Linux**:
+```bash
+sudo WAZUH_MANAGER="<VM_IP>" rpm -ihv wazuh-agent-4.12.0-1.x86_64.rpm
+sudo systemctl enable --now wazuh-agent
+```
+
+The new agent then appears under **☰ menu → Agents** as `active`. To generate a Windows authentication-failure test (event 4625 → rule 60122) with fake users so no real account locks:
+```powershell
+1..10 | ForEach-Object { cmd /c "net use \\127.0.0.1\IPC`$ /user:hacker$_ Wrong_Pass_123! 1>nul 2>nul" }
+```
+</details>
+
 ---
 
 ## 📊 Part 7: Build the AlertBoard Dashboard
